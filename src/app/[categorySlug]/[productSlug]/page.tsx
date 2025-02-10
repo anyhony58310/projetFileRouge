@@ -13,43 +13,35 @@ import {
 } from "@/components/product-attributes-table";
 import { cache } from "react";
 import { notFound } from "next/navigation";
-import { ProductData, ProductsCategoryData } from "@arthur.eudeline/starbucks-tp-kit/types";
-import { PRODUCTS_CATEGORY_DATA } from "@arthur.eudeline/starbucks-tp-kit/data";
 import { Metadata } from "next";
-
-
-type Product = ProductData & {
-  /**
-   * Contient la catégorie pour permettre de lister les produits liés.
-   * Ces derniers excluent le produit actuel de la page
-   */
-  category: ProductsCategoryData
-}
-
-/**
- * Trouve un produit à partir de sa catégorie et de son slug
- */
-const getProduct = cache(async (categorySlug: string, productSlug: string) : Promise<Product | null> => {
-  const category = PRODUCTS_CATEGORY_DATA.find(cat => cat.slug === categorySlug);
-  if (!category) return null;
-
-  const product = category.products.find(prod => prod.slug === productSlug);
-  if (!product) return null;
-  
-  return {
-    ...product,
-    category: {
-      ...category,
-      // Exclue le produit actuel des produits liés
-      products: category.products.filter((prod) => prod.slug !== productSlug),
-    }
-  }
-});
+import prisma from "@/prisma";
 
 type Props = {
   categorySlug: string;
   productSlug: string;
 };
+
+const getProduct = cache(async (categorySlug: string, productSlug: string) => {
+  try {
+    const product = await prisma.product.findUnique({
+      where: { slug: productSlug },
+      include: {
+        category: {
+          include: {
+            products: {
+              where: { slug: { not: productSlug } },
+            },
+          },
+        },
+      },
+    });
+
+    return product;
+  } catch (error) {
+    console.error("Erreur lors de la récupération du produit", error);
+    return null;
+  }
+});
 
 const productAttributes: ProductAttribute[] = [
   { label: "Intensité", rating: 3 },
@@ -59,7 +51,7 @@ const productAttributes: ProductAttribute[] = [
   { label: "Instagramabilité", rating: 5 },
 ];
 
-export async function generateMetadata({params}: NextPageProps<Props>): Promise<Metadata | null> {
+export async function generateMetadata({ params }: NextPageProps<Props>): Promise<Metadata | null> {
   const product = await getProduct(params.categorySlug, params.productSlug);
   if (!product) return null;
 
@@ -90,14 +82,12 @@ export default async function ProductPage({ params }: NextPageProps<Props>) {
           },
           {
             label: product.name,
-            url: `/${product.path}`,
+            url: `/${product.category.slug}/${product.slug}`,
           },
         ]}
       />
 
-      {/* Produit */}
       <section className="flex flex-col md:flex-row justify-center gap-8">
-        {/* Product Image */}
         <div className="relative">
           <ProductImage
             {...product}
@@ -106,19 +96,11 @@ export default async function ProductPage({ params }: NextPageProps<Props>) {
           />
         </div>
 
-        {/* Product body */}
         <div className="flex-1">
           <div className="prose prose-lg">
-            {/* Product Name */}
             <h1>{product.name}</h1>
-
-            {/* Product Rating */}
             <ProductRating value={4} size={18} className="not-prose"/>
-
-            {/* Desc */}
             <p>{product.desc}</p>
-
-            {/* Prix et ajout au panier */}
             <div className="flex justify-between items-center gap-8">
               <p className="!my-0 text-xl">
                 <FormattedPrice price={product.price} />
@@ -128,23 +110,19 @@ export default async function ProductPage({ params }: NextPageProps<Props>) {
               </Button>
             </div>
           </div>
-
-          {/* Products attribute */}
           <ProductAttributesTable className="mt-6" data={productAttributes} />
         </div>
       </section>
 
-      {/* Related products */}
       <section>
         <div className="mt-24">
           <div className="prose prose-lg mb-8">
             <h2>Vous aimerez aussi</h2>
           </div>
-
           <ProductGridLayout products={product.category.products}>
-            {(product) => (
+            {(relatedProduct) => (
               <ProductCardLayout
-                product={product}
+                product={relatedProduct}
                 button={
                   <Button variant="ghost" className="flex-1 !py-4">
                     Ajouter au panier
@@ -155,7 +133,6 @@ export default async function ProductPage({ params }: NextPageProps<Props>) {
           </ProductGridLayout>
         </div>
       </section>
-      {/* /Related products */}
     </SectionContainer>
   );
 }
